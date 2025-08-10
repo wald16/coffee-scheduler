@@ -2,67 +2,257 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-    --radius: 0.5rem;
-  }
-  .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+/* =========================
+   Instagram-like Dark Theme
+   (no Tailwind extensions needed)
+========================= */
+:root {
+  /* Base surfaces */
+  --ig-bg: #0b0b0c;
+  /* app background */
+  --ig-surface: #121214;
+  /* topbar / sections */
+  --ig-card: #191a1d;
+  /* cards, inputs */
+  --ig-card-elev: #1f2023;
+  /* hover/elevated */
+
+  /* Text */
+  --ig-text: #f2f3f4;
+  /* primary text */
+  --ig-text-dim: #a7abb3;
+  /* secondary text */
+  --ig-text-inv: #0b0b0c;
+  /* on gradient */
+
+  /* Lines / focus */
+  --ig-line: #2a2c31;
+  --ig-ring: rgba(94, 135, 255, .35);
+
+  /* Pills / radii / shadow */
+  --ig-radius: 18px;
+  --ig-pill-radius: 999px;
+  --ig-shadow: 0 12px 30px -16px rgba(0, 0, 0, .45);
+
+  /* Instagram gradient */
+  --ig-grad: linear-gradient(135deg, #405de6, #5851db, #833ab4, #c13584, #e1306c, #fd1d1d);
+}
+
+/* Base reset */
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--ig-bg);
+  color: var(--ig-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  border-color: var(--ig-line);
+}
+
+/* Container */
+.ig-container {
+  max-width: 1120px;
+  margin-inline: auto;
+  padding-inline: 16px;
+}
+
+/* Topbar glass */
+.ig-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  backdrop-filter: blur(10px) saturate(1.1);
+  background: color-mix(in oklab, var(--ig-surface) 80%, transparent);
+  border-bottom: 1px solid var(--ig-line);
+}
+
+/* Segmented nav (pill tabs) */
+.ig-pillnav {
+  display: inline-flex;
+  gap: 8px;
+  padding: 8px;
+  border-radius: var(--ig-pill-radius);
+  border: 1px solid var(--ig-line);
+  background: var(--ig-card);
+}
+
+.ig-pillnav a {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--ig-pill-radius);
+  color: #d6d9df;
+  font-weight: 600;
+  font-size: 14px;
+  border: 1px solid transparent;
+  transition: .2s ease;
+}
+
+.ig-pillnav a:hover {
+  background: var(--ig-card-elev);
+}
+
+.ig-pillnav a[data-active="true"] {
+  background: var(--ig-grad);
+  color: var(--ig-text-inv);
+  box-shadow: var(--ig-shadow);
+}
+
+/* Cards / sections */
+.ig-card {
+  background: var(--ig-card);
+  color: var(--ig-text);
+  border: 1px solid var(--ig-line);
+  border-radius: 24px;
+  box-shadow: var(--ig-shadow);
+}
+
+.ig-section {
+  padding: 20px;
+}
+
+@media(min-width:768px) {
+  .ig-section {
+    padding: 24px;
   }
 }
 
-@layer base {
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
+/* Headings */
+.h1 {
+  font-size: 28px;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: .75rem;
+  color: #e9eaee;
+}
+
+/* Inputs */
+.ig-input,
+.ig-select,
+.ig-textarea,
+input[type="date"],
+input[type="time"] {
+  width: 100%;
+  height: 46px;
+  padding: 0 14px;
+  font-size: 14px;
+  background: var(--ig-card);
+  color: var(--ig-text);
+  border: 1px solid var(--ig-line);
+  border-radius: var(--ig-radius);
+  outline: none;
+  transition: background .2s, box-shadow .2s, border-color .2s;
+}
+
+.ig-input::placeholder,
+.ig-textarea::placeholder {
+  color: var(--ig-text-dim);
+}
+
+.ig-input:hover,
+.ig-select:hover,
+.ig-textarea:hover,
+input[type="date"]:hover,
+input[type="time"]:hover {
+  background: var(--ig-card-elev);
+}
+
+:where(.ig-input, .ig-select, .ig-textarea, input[type="date"], input[type="time"]):focus-visible {
+  box-shadow: 0 0 0 4px var(--ig-ring);
+  border-color: #5e87ff;
+}
+
+.ig-textarea {
+  min-height: 110px;
+  padding: 12px 14px;
+  resize: vertical;
+}
+
+select option {
+  background: var(--ig-card);
+  color: var(--ig-text);
+}
+
+/* Buttons */
+.ig-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: var(--ig-pill-radius);
+  border: 1px solid transparent;
+  transition: filter .2s, transform .02s;
+}
+
+.ig-btn:active {
+  transform: translateY(.5px) scale(.995);
+}
+
+.ig-btn:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.ig-btn--primary {
+  background: var(--ig-grad);
+  color: var(--ig-text-inv);
+  box-shadow: var(--ig-shadow);
+}
+
+.ig-btn--primary:hover {
+  filter: brightness(.98);
+}
+
+.ig-btn--ghost {
+  background: var(--ig-card);
+  color: var(--ig-text);
+  border-color: var(--ig-line);
+}
+
+.ig-btn--ghost:hover {
+  background: var(--ig-card-elev);
+}
+
+/* Badges */
+.ig-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--ig-pill-radius);
+  background: #232429;
+  color: #cfd3db;
+  border: 1px solid var(--ig-line);
+}
+
+/* Lists */
+.ig-list-item {
+  padding: 12px 0;
+  display: flex;
+  justify-content: space-between;
+}
+
+.ig-list-item+.ig-list-item {
+  border-top: 1px solid var(--ig-line);
 }
