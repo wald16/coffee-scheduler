@@ -210,55 +210,116 @@ export default function AdminUI({
                 onToggle={toggleFranco}
             />
 
-            {/* Agenda semanal */}
+            {/* Agenda mensual */}
             <section className="ig-card ig-section">
                 <div className="pb-3">
-                    <h2 className="h2">Agenda semanal</h2>
+                    <h2 className="h2">Agenda mensual</h2>
                     <p className="text-sm" style={{ color: "var(--ig-text-dim)" }}>
-                        Genera turnos para la semana (omite francos automáticamente).
+                        Genera turnos para todo el mes seleccionado (omite francos automáticamente).
                     </p>
                 </div>
 
                 <div className="grid md:grid-cols-6 gap-3">
+                    {/* Selector de mes */}
                     <div>
-                        <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Inicio (lunes)</label>
-                        <input type="date" className="ig-input" value={weekStart} onChange={e => setWeekStart(e.target.value)} />
+                        <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Mes</label>
+                        <input
+                            type="month"
+                            className="ig-input"
+                            value={month.getFullYear() + "-" + String(month.getMonth() + 1).padStart(2, "0")}
+                            onChange={(e) => {
+                                const [yy, mm] = e.target.value.split("-").map(Number);
+                                if (yy && mm) setMonth(new Date(yy, mm - 1, 1));
+                            }}
+                        />
                     </div>
+
+                    {/* Horarios */}
                     <div>
                         <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Entrada</label>
-                        <input type="time" className="ig-input" value={startTime} onChange={e => setStartTime(e.target.value)} />
+                        <input
+                            type="time"
+                            className="ig-input"
+                            value={startTime}
+                            onChange={(e) => setStartTime(e.target.value)}
+                        />
                     </div>
                     <div>
                         <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Salida</label>
-                        <input type="time" className="ig-input" value={endTime} onChange={e => setEndTime(e.target.value)} />
+                        <input
+                            type="time"
+                            className="ig-input"
+                            value={endTime}
+                            onChange={(e) => setEndTime(e.target.value)}
+                        />
                     </div>
+
+                    {/* Overwrite */}
                     <label className="flex items-center gap-2 h-[46px] px-3 rounded-[14px] border" style={{ background: "var(--ig-card)" }}>
-                        <input type="checkbox" className="h-4 w-4" checked={overwrite} onChange={e => setOverwrite(e.currentTarget.checked)} />
-                        <span className="text-sm">Sobrescribir semana</span>
+                        <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={overwrite}
+                            onChange={(e) => setOverwrite(e.currentTarget.checked)}
+                        />
+                        <span className="text-sm">Sobrescribir mes</span>
                     </label>
+
+                    {/* Botón generar */}
                     <div className="md:col-span-2">
-                        <button onClick={buildSchedule} disabled={building} className="ig-btn ig-btn--primary w-full">
-                            {building ? "Generando…" : "Generar agenda"}
+                        <button
+                            onClick={async () => {
+                                const yearMonth = month.getFullYear() + "-" + String(month.getMonth() + 1).padStart(2, "0");
+                                try {
+                                    setBuilding(true);
+                                    const res = await fetch("/api/schedule-month", {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({
+                                            month: yearMonth,               // "YYYY-MM"
+                                            start_time: startTime,
+                                            end_time: endTime,
+                                            employee_ids: selectedEmployees,
+                                            overwrite,
+                                        }),
+                                    });
+                                    const ct = res.headers.get("content-type") || "";
+                                    const payload = ct.includes("application/json") ? await res.json() : { error: await res.text() };
+                                    if (!res.ok) throw new Error(payload?.error || `Error generando agenda (${res.status})`);
+                                    alert(`Agenda del mes creada: ${payload.count} turnos`);
+                                } catch (e: any) {
+                                    alert(e.message);
+                                } finally {
+                                    setBuilding(false);
+                                }
+                            }}
+                            disabled={building}
+                            className="ig-btn ig-btn--primary w-full"
+                        >
+                            {building ? "Generando…" : "Generar agenda mensual"}
                         </button>
                     </div>
                 </div>
 
+                {/* Chips de empleados incluidos */}
                 <div className="mt-4">
                     <div className="text-sm mb-2" style={{ color: "var(--ig-text-dim)" }}>Empleados incluidos</div>
                     <div className="flex flex-wrap gap-2">
-                        {employees.map(e => {
+                        {employees.map((e) => {
                             const checked = selectedEmployees.includes(e.id);
                             return (
                                 <button
                                     key={e.id}
                                     onClick={() =>
-                                        setSelectedEmployees(prev => checked ? prev.filter(id => id !== e.id) : [...prev, e.id])
+                                        setSelectedEmployees((prev) =>
+                                            checked ? prev.filter((id) => id !== e.id) : [...prev, e.id]
+                                        )
                                     }
                                     className="ig-badge"
                                     style={{
                                         background: checked ? "var(--ig-grad)" : "#232429",
                                         color: checked ? "var(--ig-text-inv)" : "#cfd3db",
-                                        borderColor: "var(--ig-line)"
+                                        borderColor: "var(--ig-line)",
                                     }}
                                 >
                                     {e.full_name || e.id}
@@ -268,6 +329,7 @@ export default function AdminUI({
                     </div>
                 </div>
             </section>
+
         </div>
     );
 }
