@@ -1,17 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import MonthCalendar from "@/components/admin/MonthCalendar";
-import { ymdLocal, parseYmdLocal } from "@/lib/date";
+import { ymdLocal } from "@/lib/date";
 
 type Employee = { id: string; full_name: string | null; role: "admin" | "employee" };
 type DayOff = { employee_id: string; date: string };
+type Shift = { date: string; start_time: string; end_time: string };
 
 export default function AdminUI({
     employees,
     initialDaysOff,
-    monthStart,
-    monthEnd,
 }: {
     employees: Employee[];
     initialDaysOff: DayOff[];
@@ -22,7 +21,7 @@ export default function AdminUI({
     const [daysOff, setDaysOff] = useState<DayOff[]>(initialDaysOff);
     const [month, setMonth] = useState<Date>(new Date());
 
-    // ----- INVITE -----
+    // --- INVITE ---
     const [inviteEmail, setInviteEmail] = useState("");
     const [inviteName, setInviteName] = useState("");
     const [inviteRole, setInviteRole] = useState<"employee" | "admin">("employee");
@@ -55,26 +54,59 @@ export default function AdminUI({
         }
     }
 
-    // ----- AGENDA SEMANAL -----
-    const [weekStart, setWeekStart] = useState<string>(""); // YYYY-MM-DD (lunes)
-    const [startTime, setStartTime] = useState("09:00");
-    const [endTime, setEndTime] = useState("17:00");
-    const [selectedEmployees, setSelectedEmployees] = useState<string[]>(employees.map(e => e.id));
-    const [overwrite, setOverwrite] = useState(true);
-    const [building, setBuilding] = useState(false);
+    // --- SHIFTS DEL EMPLEADO SELECCIONADO (para pintar en el calendario) ---
+    const [empShifts, setEmpShifts] = useState<Shift[]>([]);
+    const [loadingShifts, setLoadingShifts] = useState(false);
 
+    function monthBounds(d: Date) {
+        const start = new Date(d.getFullYear(), d.getMonth(), 1);
+        const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+        return { start: ymdLocal(start), end: ymdLocal(end) };
+    }
+
+    useEffect(() => {
+        async function load() {
+            if (!selectedEmp) return;
+            const { start, end } = monthBounds(month);
+            setLoadingShifts(true);
+            try {
+                const res = await fetch("/api/employee-month", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ employee_id: selectedEmp, start, end }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data?.error || "Error cargando horarios");
+                setEmpShifts(data.shifts || []);
+            } catch (e) {
+                console.error(e);
+                setEmpShifts([]);
+            } finally {
+                setLoadingShifts(false);
+            }
+        }
+        load();
+    }, [selectedEmp, month]);
+
+    // Mapa id -> nombre (tooltips de francos)
     const employeeById = useMemo(() => {
         const r: Record<string, string | null> = {};
         for (const e of employees) r[e.id] = e.full_name;
         return r;
     }, [employees]);
 
+    // Alternar franco (del empleado seleccionado)
     async function toggleFranco(dateStr: string, willTurnOn: boolean) {
-        // optimistic UI
+        // optimistic UI en days_off
         setDaysOff(prev => {
             if (willTurnOn) return [...prev, { employee_id: selectedEmp, date: dateStr }];
             return prev.filter(d => !(d.employee_id === selectedEmp && d.date === dateStr));
         });
+
+        // si encendemos franco, limpiamos turno localmente (y opcional: en server)
+        if (willTurnOn) {
+            setEmpShifts(prev => prev.filter(s => s.date !== dateStr));
+        }
 
         const res = await fetch("/api/days-off", {
             method: "POST",
@@ -90,6 +122,20 @@ export default function AdminUI({
                 return [...prev, { employee_id: selectedEmp, date: dateStr }];
             });
             alert(payload?.error || "Error guardando franco");
+            return;
+        }
+
+        // opcional: si se marcó franco en server, intentamos borrar el shift del día
+        if (willTurnOn) {
+            try {
+                await fetch("/api/shift-day", {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ employee_id: selectedEmp, date: dateStr }),
+                });
+            } catch {
+                /* ignore */
+            }
         }
     }
 
@@ -99,51 +145,127 @@ export default function AdminUI({
         setMonth(d);
     }
 
-    function weekDates(weekStartStr: string) {
-        if (!weekStartStr) return [];
-        const start = parseYmdLocal(weekStartStr);
-        return Array.from({ length: 7 }, (_, i) => {
-            const d = new Date(start);
-            d.setDate(d.getDate() + i);
-            return ymdLocal(d);
+    // --- EDITOR DE DÍA (horario) ---
+    const [editor, setEditor] = useState<{ open: boolean; date: string; start: string; end: string }>({
+        open: false,
+        date: "",
+        start: "09:00",
+        end: "17:00",
+    });
+    const isOffThisDay =
+        editor.open &&
+        daysOff.some(d => d.employee_id === selectedEmp && d.date === editor.date);
+
+    function openEditor(date: string, current?: { start_time: string; end_time: string } | null) {
+        setEditor({
+            open: true,
+            date,
+            start: (current?.start_time || "09:00").slice(0, 5),
+            end: (current?.end_time || "17:00").slice(0, 5),
         });
     }
 
-    async function buildSchedule() {
-        if (!weekStart) return alert("Selecciona semana (lunes)");
-        const s = parseYmdLocal(weekStart);
-        const e = new Date(s);
-        e.setDate(e.getDate() + 6);
-        const weekEnd = ymdLocal(e);
+    async function saveEditor() {
+        if (!editor.date) return;
+        if (editor.start >= editor.end) return alert("Inicio debe ser menor que Fin");
+        // optimistic upsert en estado local
+        setEmpShifts(prev => {
+            const rest = prev.filter(s => s.date !== editor.date);
+            return [...rest, { date: editor.date, start_time: editor.start, end_time: editor.end }];
+        });
+        const res = await fetch("/api/shift-day", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                employee_id: selectedEmp,
+                date: editor.date,
+                start_time: editor.start,
+                end_time: editor.end,
+            }),
+        });
+        const ct = res.headers.get("content-type") || "";
+        const payload = ct.includes("application/json") ? await res.json() : { error: await res.text() };
+        if (!res.ok) {
+            // rollback: quitamos lo que pusimos
+            setEmpShifts(prev => prev.filter(s => s.date !== editor.date));
+            alert(payload?.error || "Error guardando turno");
+            return;
+        }
+        setEditor(e => ({ ...e, open: false }));
+    }
 
-        try {
-            setBuilding(true);
-            const res = await fetch("/api/schedule", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    weekStart,
-                    weekEnd,
-                    start_time: startTime,
-                    end_time: endTime,
-                    employee_ids: selectedEmployees,
-                    overwrite,
-                }),
+    async function removeShiftForDay() {
+        if (!editor.date) return;
+        // optimistic
+        setEmpShifts(prev => prev.filter(s => s.date !== editor.date));
+        const res = await fetch("/api/shift-day", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ employee_id: selectedEmp, date: editor.date }),
+        });
+        if (!res.ok) {
+            // rollback (no sabemos las horas, así que solo avisamos)
+            alert("No se pudo eliminar el turno");
+        }
+        setEditor(e => ({ ...e, open: false }));
+    }
+    async function toggleFrancoFromEditor() {
+        if (!editor.date) return;
+        const willTurnOn = !isOffThisDay;
+
+        // Optimistic: actualizamos UI de francos
+        setDaysOff(prev => {
+            if (willTurnOn) return [...prev, { employee_id: selectedEmp, date: editor.date }];
+            return prev.filter(d => !(d.employee_id === selectedEmp && d.date === editor.date));
+        });
+
+        // Si marcamos franco, limpiamos turno local
+        if (willTurnOn) {
+            setEmpShifts(prev => prev.filter(s => s.date !== editor.date));
+        }
+
+        // Server
+        const res = await fetch("/api/days-off", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ employee_id: selectedEmp, date: editor.date, on: willTurnOn }),
+        });
+
+        if (!res.ok) {
+            // rollback en caso de error
+            setDaysOff(prev => {
+                if (willTurnOn) return prev.filter(d => !(d.employee_id === selectedEmp && d.date === editor.date));
+                return [...prev, { employee_id: selectedEmp, date: editor.date }];
             });
-            const ct = res.headers.get("content-type") || "";
-            const payload = ct.includes("application/json") ? await res.json() : { error: await res.text() };
-            if (!res.ok) throw new Error(payload?.error || `Error generando agenda (${res.status})`);
-            alert(`Agenda creada: ${payload.count} turnos`);
-        } catch (e: any) {
-            alert(e.message);
-        } finally {
-            setBuilding(false);
+            alert("No se pudo actualizar el franco");
+            return;
+        }
+
+        // Si lo marcamos como franco, también eliminamos cualquier turno del día en server (best-effort)
+        if (willTurnOn) {
+            try {
+                await fetch("/api/shift-day", {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ employee_id: selectedEmp, date: editor.date }),
+                });
+            } catch {/* no-op */ }
+            // Cerramos el editor porque ya no tiene sentido editar horario si es franco
+            setEditor(e => ({ ...e, open: false }));
         }
     }
 
+
+    // --- AGENDA MENSUAL (igual que tenías) ---
+    const [startTime, setStartTime] = useState("09:00");
+    const [endTime, setEndTime] = useState("17:00");
+    const [selectedEmployees, setSelectedEmployees] = useState<string[]>(employees.map(e => e.id));
+    const [overwrite, setOverwrite] = useState(true);
+    const [building, setBuilding] = useState(false);
+
     return (
         <div className="space-y-6">
-            {/* INVITE — arriba de todo */}
+            {/* INVITE */}
             <section className="ig-card ig-section">
                 <div className="pb-3">
                     <h2 className="h2">Invitar empleado</h2>
@@ -208,6 +330,8 @@ export default function AdminUI({
                 daysOff={daysOff}
                 employeeById={employeeById}
                 onToggle={toggleFranco}
+                shiftsForSelectedEmp={empShifts}
+                onEditDay={(date, current) => openEditor(date, current)}
             />
 
             {/* Agenda mensual */}
@@ -237,31 +361,16 @@ export default function AdminUI({
                     {/* Horarios */}
                     <div>
                         <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Entrada</label>
-                        <input
-                            type="time"
-                            className="ig-input"
-                            value={startTime}
-                            onChange={(e) => setStartTime(e.target.value)}
-                        />
+                        <input type="time" className="ig-input" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
                     </div>
                     <div>
                         <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Salida</label>
-                        <input
-                            type="time"
-                            className="ig-input"
-                            value={endTime}
-                            onChange={(e) => setEndTime(e.target.value)}
-                        />
+                        <input type="time" className="ig-input" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
                     </div>
 
                     {/* Overwrite */}
                     <label className="flex items-center gap-2 h-[46px] px-3 rounded-[14px] border" style={{ background: "var(--ig-card)" }}>
-                        <input
-                            type="checkbox"
-                            className="h-4 w-4"
-                            checked={overwrite}
-                            onChange={(e) => setOverwrite(e.currentTarget.checked)}
-                        />
+                        <input type="checkbox" className="h-4 w-4" checked={overwrite} onChange={(e) => setOverwrite(e.currentTarget.checked)} />
                         <span className="text-sm">Sobrescribir mes</span>
                     </label>
 
@@ -276,7 +385,7 @@ export default function AdminUI({
                                         method: "POST",
                                         headers: { "Content-Type": "application/json" },
                                         body: JSON.stringify({
-                                            month: yearMonth,               // "YYYY-MM"
+                                            month: yearMonth,
                                             start_time: startTime,
                                             end_time: endTime,
                                             employee_ids: selectedEmployees,
@@ -287,6 +396,17 @@ export default function AdminUI({
                                     const payload = ct.includes("application/json") ? await res.json() : { error: await res.text() };
                                     if (!res.ok) throw new Error(payload?.error || `Error generando agenda (${res.status})`);
                                     alert(`Agenda del mes creada: ${payload.count} turnos`);
+                                    // refrescamos shifts del seleccionado por si es parte
+                                    if (selectedEmployees.includes(selectedEmp)) {
+                                        const { start, end } = monthBounds(month);
+                                        const r2 = await fetch("/api/employee-month", {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ employee_id: selectedEmp, start, end }),
+                                        });
+                                        const d2 = await r2.json();
+                                        if (r2.ok) setEmpShifts(d2.shifts || []);
+                                    }
                                 } catch (e: any) {
                                     alert(e.message);
                                 } finally {
@@ -311,9 +431,7 @@ export default function AdminUI({
                                 <button
                                     key={e.id}
                                     onClick={() =>
-                                        setSelectedEmployees((prev) =>
-                                            checked ? prev.filter((id) => id !== e.id) : [...prev, e.id]
-                                        )
+                                        setSelectedEmployees((prev) => (checked ? prev.filter((id) => id !== e.id) : [...prev, e.id]))
                                     }
                                     className="ig-badge"
                                     style={{
@@ -330,6 +448,67 @@ export default function AdminUI({
                 </div>
             </section>
 
+            {/* Editor modal simple */}
+            {editor.open && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center">
+                    <div className="absolute inset-0 bg-black/40" onClick={() => setEditor(e => ({ ...e, open: false }))} />
+                    <div className="relative z-10 w-full max-w-sm ig-card ig-section">
+                        <h3 className="h2">Editar horario — {editor.date}</h3>
+
+                        <div className="grid grid-cols-2 gap-3 mt-3">
+                            <button
+                                className="ig-btn ig-btn--ghost"
+                                onClick={() => setEditor(e => ({ ...e, start: "09:00", end: "13:00" }))}
+                            >
+                                Mañana (09:00–13:00)
+                            </button>
+                            <button
+                                className="ig-btn ig-btn--ghost"
+                                onClick={() => setEditor(e => ({ ...e, start: "15:00", end: "19:00" }))}
+                            >
+                                Tarde (15:00–19:00)
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mt-3">
+                            <div>
+                                <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Inicio</label>
+                                <input type="time" className="ig-input" value={editor.start} onChange={e => setEditor(ed => ({ ...ed, start: e.target.value }))} />
+                            </div>
+                            <div>
+                                <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Fin</label>
+                                <input type="time" className="ig-input" value={editor.end} onChange={e => setEditor(ed => ({ ...ed, end: e.target.value }))} />
+                            </div>
+                        </div>
+
+
+                        <div className="mt-4 flex gap-2">
+                            <button className="ig-btn ig-btn--primary flex-1" onClick={saveEditor}>Guardar</button>
+                            <button
+                                className="ig-btn ig-btn--primary"
+                                onClick={toggleFrancoFromEditor}
+                                title={isOffThisDay ? "Quitar franco" : "Franco"}
+                            >
+                                {isOffThisDay ? "Quitar franco" : "Franco"}
+                            </button>
+                            <button className="ig-btn ig-btn--ghost" onClick={removeShiftForDay}>Eliminar turno</button>
+
+                        </div>
+
+
+
+                        <p className="mt-2 text-xs" style={{ color: "var(--ig-text-dim)" }}>
+                            Si este día está marcado como <b>franco</b>, primero quitalo para poder asignar horario.
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            {loadingShifts && (
+                <div className="text-xs" style={{ color: "var(--ig-text-dim)" }}>
+                    Cargando horarios…
+                </div>
+            )}
         </div>
     );
 }
