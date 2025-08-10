@@ -1,6 +1,7 @@
 // /app/api/schedule/route.ts
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { ymdLocal, parseYmdLocal } from "@/lib/date";
 
 // Body:
 // {
@@ -34,7 +35,7 @@ export async function POST(req: Request) {
 
         const supa = createServiceClient();
 
-        // 1) Overwrite: delete shifts in that week for those employees
+        // Overwrite: borrar turnos existentes en esa semana (inclusive)
         if (overwrite) {
             const del = await supa
                 .from("shifts")
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
             }
         }
 
-        // 2) Get days off for the week
+        // Francos de la semana para esos empleados
         const offs = await supa
             .from("days_off")
             .select("employee_id,date")
@@ -61,24 +62,18 @@ export async function POST(req: Request) {
 
         const offSet = new Set<string>((offs.data ?? []).map(o => `${o.employee_id}|${o.date}`));
 
-        // 3) Build list of days in [weekStart, weekEnd]
+        // Días de la semana [weekStart..weekEnd] en LOCAL
         const days: string[] = [];
         {
-            const s = new Date(weekStart);
-            const e = new Date(weekEnd);
+            const s = parseYmdLocal(weekStart);
+            const e = parseYmdLocal(weekEnd);
             for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
-                days.push(d.toISOString().slice(0, 10));
+                days.push(ymdLocal(d));
             }
         }
 
-        // 4) Generate rows (skip days off)
-        const rows: Array<{
-            employee_id: string;
-            date: string;
-            start_time: string;
-            end_time: string;
-        }> = [];
-
+        // Generar filas, saltando francos
+        const rows: Array<{ employee_id: string; date: string; start_time: string; end_time: string; }> = [];
         for (const emp of employee_ids) {
             for (const d of days) {
                 if (!offSet.has(`${emp}|${d}`)) {
@@ -87,7 +82,6 @@ export async function POST(req: Request) {
             }
         }
 
-        // 5) Insert
         let inserted = 0;
         if (rows.length) {
             const ins = await supa.from("shifts").insert(rows);

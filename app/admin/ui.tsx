@@ -1,167 +1,224 @@
 "use client";
-import { useState } from "react";
+
+import { useMemo, useState } from "react";
+import MonthCalendar from "@/components/admin/MonthCalendar";
+import { ymdLocal, parseYmdLocal } from "@/lib/date";
+
 type Employee = { id: string; full_name: string | null; role: "admin" | "employee" };
+type DayOff = { employee_id: string; date: string };
 
-function Section({ title, subtitle, children }: {
-    title: string; subtitle?: string; children: React.ReactNode
+export default function AdminUI({
+    employees,
+    initialDaysOff,
+    monthStart,
+    monthEnd,
+}: {
+    employees: Employee[];
+    initialDaysOff: DayOff[];
+    monthStart: string;
+    monthEnd: string;
 }) {
-    return (
-        <section className="ig-card ig-section">
-            <div className="pb-4">
-                <h2 className="h2">{title}</h2>
-                {subtitle && <p className="text-sm" style={{ color: "var(--ig-text-dim)" }}>{subtitle}</p>}
-            </div>
-            {children}
-        </section>
-    );
-}
+    const [selectedEmp, setSelectedEmp] = useState<string>(employees[0]?.id ?? "");
+    const [daysOff, setDaysOff] = useState<DayOff[]>(initialDaysOff);
+    const [month, setMonth] = useState<Date>(new Date());
 
-export default function AdminClient({ employees }: { employees: Employee[] }) {
+    // ----- INVITE -----
     const [inviteEmail, setInviteEmail] = useState("");
     const [inviteName, setInviteName] = useState("");
-    const [inviteRole, setInviteRole] = useState<"admin" | "employee">("employee");
+    const [inviteRole, setInviteRole] = useState<"employee" | "admin">("employee");
     const [inviteLoading, setInviteLoading] = useState(false);
 
-    const [selectedEmp, setSelectedEmp] = useState<string>(employees[0]?.id ?? "");
-    const [weekStart, setWeekStart] = useState<string>("");
-    const [francos, setFrancos] = useState<Record<string, boolean>>({});
+    async function sendInvite() {
+        if (!inviteEmail) return alert("Email requerido");
+        try {
+            setInviteLoading(true);
+            const res = await fetch("/api/invite", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    email: inviteEmail.trim(),
+                    full_name: inviteName.trim() || null,
+                    role: inviteRole,
+                }),
+            });
+            const ct = res.headers.get("content-type") || "";
+            const payload = ct.includes("application/json") ? await res.json() : { error: await res.text() };
+            if (!res.ok) throw new Error(payload?.error || `Invite failed (${res.status})`);
+            alert("Invitación enviada ✅");
+            setInviteEmail("");
+            setInviteName("");
+            setInviteRole("employee");
+        } catch (e: any) {
+            alert(e.message || "Error enviando invitación");
+        } finally {
+            setInviteLoading(false);
+        }
+    }
 
+    // ----- AGENDA SEMANAL -----
+    const [weekStart, setWeekStart] = useState<string>(""); // YYYY-MM-DD (lunes)
     const [startTime, setStartTime] = useState("09:00");
     const [endTime, setEndTime] = useState("17:00");
     const [selectedEmployees, setSelectedEmployees] = useState<string[]>(employees.map(e => e.id));
     const [overwrite, setOverwrite] = useState(true);
     const [building, setBuilding] = useState(false);
 
-    function weekDates() {
-        if (!weekStart) return [];
-        const s = new Date(weekStart);
-        return Array.from({ length: 7 }, (_, i) => { const d = new Date(s); d.setDate(d.getDate() + i); return d.toISOString().slice(0, 10); });
-    }
-    const dates = weekDates();
+    const employeeById = useMemo(() => {
+        const r: Record<string, string | null> = {};
+        for (const e of employees) r[e.id] = e.full_name;
+        return r;
+    }, [employees]);
 
-    async function invite() {
-        try {
-            setInviteLoading(true);
-            const res = await fetch("/api/invite", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ email: inviteEmail, full_name: inviteName, role: inviteRole })
-            });
-            const j = await res.json();
-            if (!res.ok) throw new Error(j.error || "Invite failed");
-            setInviteEmail(""); setInviteName("");
-            alert("Invitación enviada");
-        } catch (e: any) { alert(e.message); } finally { setInviteLoading(false); }
-    }
-
-    async function saveFrancos() {
-        if (!selectedEmp || !weekStart) return alert("Selecciona empleado y semana");
-        const ds = weekDates();
-        const selected = ds.filter(d => francos[d]);
-
-        const start = new Date(weekStart);
-        const end = new Date(start); end.setDate(start.getDate() + 6);
-
-        const res = await fetch("/api/francos", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                employee_id: selectedEmp,
-                weekStart: weekStart,
-                weekEnd: end.toISOString().slice(0, 10),
-                dates: selected
-            }),
+    async function toggleFranco(dateStr: string, willTurnOn: boolean) {
+        // optimistic UI
+        setDaysOff(prev => {
+            if (willTurnOn) return [...prev, { employee_id: selectedEmp, date: dateStr }];
+            return prev.filter(d => !(d.employee_id === selectedEmp && d.date === dateStr));
         });
 
-        let j: any = {};
-        try { j = await res.json(); } catch { }
-        if (!res.ok) return alert(j.error || "Error guardando francos");
-        alert("Francos guardados");
+        const res = await fetch("/api/days-off", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ employee_id: selectedEmp, date: dateStr, on: willTurnOn }),
+        });
+        const ct = res.headers.get("content-type") || "";
+        const payload = ct.includes("application/json") ? await res.json() : { error: await res.text() };
+        if (!res.ok) {
+            // rollback
+            setDaysOff(prev => {
+                if (willTurnOn) return prev.filter(d => !(d.employee_id === selectedEmp && d.date === dateStr));
+                return [...prev, { employee_id: selectedEmp, date: dateStr }];
+            });
+            alert(payload?.error || "Error guardando franco");
+        }
     }
 
+    function incMonth(n: number) {
+        const d = new Date(month);
+        d.setMonth(d.getMonth() + n);
+        setMonth(d);
+    }
+
+    function weekDates(weekStartStr: string) {
+        if (!weekStartStr) return [];
+        const start = parseYmdLocal(weekStartStr);
+        return Array.from({ length: 7 }, (_, i) => {
+            const d = new Date(start);
+            d.setDate(d.getDate() + i);
+            return ymdLocal(d);
+        });
+    }
 
     async function buildSchedule() {
         if (!weekStart) return alert("Selecciona semana (lunes)");
-        const s = new Date(weekStart); const e = new Date(s); e.setDate(s.getDate() + 6);
+        const s = parseYmdLocal(weekStart);
+        const e = new Date(s);
+        e.setDate(e.getDate() + 6);
+        const weekEnd = ymdLocal(e);
+
         try {
             setBuilding(true);
             const res = await fetch("/api/schedule", {
-                method: "POST", headers: { "Content-Type": "application/json" },
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     weekStart,
-                    weekEnd: e.toISOString().slice(0, 10),
+                    weekEnd,
                     start_time: startTime,
                     end_time: endTime,
                     employee_ids: selectedEmployees,
-                    overwrite
-                })
+                    overwrite,
+                }),
             });
-            const j = await res.json();
-            if (!res.ok) throw new Error(j.error || "Error generando agenda");
-            alert(`Agenda creada: ${j.count} turnos`);
-        } catch (e: any) { alert(e.message); } finally { setBuilding(false); }
+            const ct = res.headers.get("content-type") || "";
+            const payload = ct.includes("application/json") ? await res.json() : { error: await res.text() };
+            if (!res.ok) throw new Error(payload?.error || `Error generando agenda (${res.status})`);
+            alert(`Agenda creada: ${payload.count} turnos`);
+        } catch (e: any) {
+            alert(e.message);
+        } finally {
+            setBuilding(false);
+        }
     }
 
     return (
         <div className="space-y-6">
-            {/* Invite */}
-            <Section title="Invitar empleado" subtitle="Crea usuarios por email y asigna su rol.">
-                <div className="grid gap-3 md:grid-cols-5">
-                    <input className="ig-input" placeholder="Nombre" value={inviteName} onChange={e => setInviteName(e.target.value)} />
-                    <input className="ig-input md:col-span-2" placeholder="email@empresa.com" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} />
-                    <select className="ig-select" value={inviteRole} onChange={e => setInviteRole(e.target.value as any)}>
-                        <option value="employee">Employee</option>
-                        <option value="admin">Admin</option>
-                    </select>
-                    <button onClick={invite} disabled={inviteLoading} className="ig-btn ig-btn--primary">
-                        {inviteLoading ? "Enviando…" : "Invitar"}
+            {/* INVITE — arriba de todo */}
+            <section className="ig-card ig-section">
+                <div className="pb-3">
+                    <h2 className="h2">Invitar empleado</h2>
+                    <p className="text-sm" style={{ color: "var(--ig-text-dim)" }}>
+                        Envía una invitación por email. Al aceptar, definirá su contraseña.
+                    </p>
+                </div>
+
+                <div className="grid md:grid-cols-4 gap-3">
+                    <div>
+                        <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Nombre completo</label>
+                        <input className="ig-input" value={inviteName} onChange={e => setInviteName(e.target.value)} placeholder="Ej: Ana Pérez" />
+                    </div>
+                    <div className="md:col-span-2">
+                        <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Email</label>
+                        <input className="ig-input" type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} placeholder="ana@example.com" />
+                    </div>
+                    <div>
+                        <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Rol</label>
+                        <select className="ig-select" value={inviteRole} onChange={(e) => setInviteRole(e.target.value as any)}>
+                            <option value="employee">Empleado</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="mt-3">
+                    <button className="ig-btn ig-btn--primary" onClick={sendInvite} disabled={inviteLoading}>
+                        {inviteLoading ? "Enviando…" : "Enviar invitación"}
                     </button>
                 </div>
-            </Section>
+            </section>
 
-            {/* Francos */}
-            <Section title="Francos (semana)" subtitle="Marca los días libres para la semana seleccionada.">
-                <div className="flex flex-wrap items-end gap-3">
-                    <div className="min-w-[220px]">
-                        <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Empleado</label>
-                        <select className="ig-select" value={selectedEmp} onChange={e => setSelectedEmp(e.target.value)}>
+            {/* Top controls */}
+            <section className="ig-card ig-section">
+                <div className="grid gap-3 md:grid-cols-3">
+                    <div>
+                        <div className="text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Empleado</div>
+                        <select className="ig-select" value={selectedEmp} onChange={(e) => setSelectedEmp(e.target.value)}>
                             {employees.map(e => (
-                                <option key={e.id} value={e.id}>{e.full_name || e.id} {e.role === "admin" ? "(admin)" : ""}</option>
+                                <option key={e.id} value={e.id}>
+                                    {e.full_name || e.id} {e.role === "admin" ? "(admin)" : ""}
+                                </option>
                             ))}
                         </select>
                     </div>
-                    <div>
-                        <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Lunes de la semana</label>
-                        <input type="date" className="ig-input" value={weekStart} onChange={e => setWeekStart(e.target.value)} />
+                    <div className="flex items-end gap-2">
+                        <button className="ig-btn ig-btn--ghost" onClick={() => incMonth(-1)}>← Mes anterior</button>
+                        <button className="ig-btn ig-btn--ghost" onClick={() => setMonth(new Date())}>Hoy</button>
+                        <button className="ig-btn ig-btn--ghost" onClick={() => incMonth(1)}>Mes siguiente →</button>
                     </div>
-                    <div className="ml-auto">
-                        <button onClick={saveFrancos} className="ig-btn ig-btn--ghost">Guardar francos</button>
+                    <div className="text-right text-sm md:self-end" style={{ color: "var(--ig-text-dim)" }}>
+                        <span>{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
                     </div>
                 </div>
+            </section>
 
-                {dates.length > 0 && (
-                    <div className="mt-4 grid grid-cols-2 md:grid-cols-7 gap-2">
-                        {dates.map(d => {
-                            const on = !!francos[d];
-                            return (
-                                <button
-                                    key={d}
-                                    onClick={() => setFrancos(prev => ({ ...prev, [d]: !on }))}
-                                    className={`h-10 rounded-[14px] border text-sm px-3 ${on ? "text-[var(--ig-text-inv)]" : ""}`}
-                                    style={{
-                                        background: on ? "var(--ig-grad)" : "var(--ig-card)",
-                                        borderColor: "var(--ig-line)"
-                                    }}
-                                >
-                                    {new Date(d).toLocaleDateString()}
-                                </button>
-                            );
-                        })}
-                    </div>
-                )}
-            </Section>
+            {/* Calendar */}
+            <MonthCalendar
+                month={month}
+                selectedEmployeeId={selectedEmp}
+                daysOff={daysOff}
+                employeeById={employeeById}
+                onToggle={toggleFranco}
+            />
 
-            {/* Schedule */}
-            <Section title="Agenda semanal" subtitle="Genera turnos (omite francos automáticamente).">
+            {/* Agenda semanal */}
+            <section className="ig-card ig-section">
+                <div className="pb-3">
+                    <h2 className="h2">Agenda semanal</h2>
+                    <p className="text-sm" style={{ color: "var(--ig-text-dim)" }}>
+                        Genera turnos para la semana (omite francos automáticamente).
+                    </p>
+                </div>
+
                 <div className="grid md:grid-cols-6 gap-3">
                     <div>
                         <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Inicio (lunes)</label>
@@ -177,7 +234,7 @@ export default function AdminClient({ employees }: { employees: Employee[] }) {
                     </div>
                     <label className="flex items-center gap-2 h-[46px] px-3 rounded-[14px] border" style={{ background: "var(--ig-card)" }}>
                         <input type="checkbox" className="h-4 w-4" checked={overwrite} onChange={e => setOverwrite(e.currentTarget.checked)} />
-                        <span className="text-sm" style={{ color: "var(--ig-text)" }}>Sobrescribir semana</span>
+                        <span className="text-sm">Sobrescribir semana</span>
                     </label>
                     <div className="md:col-span-2">
                         <button onClick={buildSchedule} disabled={building} className="ig-btn ig-btn--primary w-full">
@@ -194,7 +251,9 @@ export default function AdminClient({ employees }: { employees: Employee[] }) {
                             return (
                                 <button
                                     key={e.id}
-                                    onClick={() => setSelectedEmployees(prev => checked ? prev.filter(id => id !== e.id) : [...prev, e.id])}
+                                    onClick={() =>
+                                        setSelectedEmployees(prev => checked ? prev.filter(id => id !== e.id) : [...prev, e.id])
+                                    }
                                     className="ig-badge"
                                     style={{
                                         background: checked ? "var(--ig-grad)" : "#232429",
@@ -208,7 +267,7 @@ export default function AdminClient({ employees }: { employees: Employee[] }) {
                         })}
                     </div>
                 </div>
-            </Section>
+            </section>
         </div>
     );
 }

@@ -1,8 +1,9 @@
-// /lib/supabase/server.ts
+// lib/supabase/server.ts
 import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient } from "@supabase/ssr"; // o el que ya usabas
 
 export async function createServerSupabase() {
+  // si antes te pedía await, dejalo con await
   const cookieStore = await cookies();
 
   return createServerClient(
@@ -14,11 +15,19 @@ export async function createServerSupabase() {
           return cookieStore.get(name)?.value;
         },
         set(name: string, value: string, options: any) {
-          cookieStore.set({ name, value, ...options });
+          // 👇 Evita el crash cuando no se puede escribir cookies aquí
+          try {
+            cookieStore.set({ name, value, ...options });
+          } catch {
+            // no-op en Server Components; se permitirá en Route Handlers / Server Actions
+          }
         },
         remove(name: string, options: any) {
-          // expire the cookie
-          cookieStore.set({ name, value: "", ...options, expires: new Date(0) });
+          try {
+            cookieStore.set({ name, value: "", ...options, expires: new Date(0) });
+          } catch {
+            // no-op
+          }
         },
       },
     }

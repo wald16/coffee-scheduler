@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { formatYmdLocalLabel } from "@/lib/date";
 
 export default async function MisTurnosPage() {
     const supabase = await createServerSupabase();
@@ -29,7 +30,7 @@ export default async function MisTurnosPage() {
                     {shifts?.map((s) => (
                         <li key={s.id} className="ig-list-item">
                             <div>
-                                <div className="font-semibold">{new Date(s.date).toLocaleDateString()}</div>
+                                <div className="font-semibold"> {formatYmdLocalLabel(s.date)}</div>
                                 <div className="text-sm" style={{ color: "var(--ig-text-dim)" }}>
                                     {s.start_time} — {s.end_time}{s.notes ? ` · ${s.notes}` : ""}
                                 </div>
@@ -44,7 +45,7 @@ export default async function MisTurnosPage() {
                 {!daysOff?.length && <p className="text-sm" style={{ color: "var(--ig-text-dim)" }}>Sin francos cargados.</p>}
                 <div className="flex flex-wrap gap-2">
                     {daysOff?.map((d, i) => (
-                        <span key={i} className="ig-badge">{new Date(d.date).toLocaleDateString()}</span>
+                        <span key={i} className="ig-badge">{formatYmdLocalLabel(d.date)}</span>
                     ))}
                 </div>
             </section>
