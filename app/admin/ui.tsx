@@ -436,10 +436,6 @@ export default function AdminUI({
                         <label className="block text-sm mb-1" style={{ color: "var(--ig-text-dim)" }}>Lunes de la semana</label>
                         <input type="date" className="ig-input" value={exportWeekByEmp} onChange={(e) => setExportWeekByEmp(e.target.value)} />
                     </div>
-                    <label className="flex items-center gap-2 h-[65px] px-3 rounded-[14px] border" style={{ background: "var(--ig-card)" }}>
-                        <input type="checkbox" className="h-4 w-4" checked={showHours} onChange={(e) => setShowHours(e.currentTarget.checked)} />
-                        <span className="text-sm">Mostrar horas (en lugar de TM/TT)</span>
-                    </label>
                     <div className="md:col-span-2 flex items-end">
                         <button
                             className="ig-btn ig-btn--primary"
