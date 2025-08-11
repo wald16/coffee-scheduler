@@ -188,13 +188,13 @@ export default function MonthCalendar({
                             {/* horarios visibles cuando es laboral */}
                             {!isOffMine && hasShift && (
                                 <div className="absolute left-2 right-2 bottom-2 text-[11px] opacity-95">
-                                    {formatHM(shift?.start_time)}–{formatHM(shift?.end_time)}
+                                    {shift?.start_time ? (shift.start_time.slice(0, 2) < "14" ? "TM" : "TT") : ""}
                                 </div>
                             )}
 
                             {/* contador de francos (otros) */}
                             {countOffs > 0 && (
-                                <div className="absolute bottom-2 left-2">
+                                <div className="absolute top-2 right-1">
                                     <span
                                         className="ig-badge"
                                         style={{
@@ -224,6 +224,6 @@ export default function MonthCalendar({
                 Tip: Click en un día <strong>con franco</strong> alterna el franco. Click en un día <strong>sin
                     franco</strong> abre el editor para asignar/editar horario.
             </p>
-        </div>
+        </div >
     );
 }
